@@ -12,22 +12,23 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, Flatten
 from tensorflow.keras.layers import Conv2D, MaxPooling2D
 from tensorflow.keras.optimizers import SGD
+from tensorflow.keras.optimizers import RMSprop
+from tensorflow.keras.optimizers import Adagrad
 from tensorflow.keras.initializers import RandomUniform
 from time import time
 from random import randint
 
-
-tf.debugging.set_log_device_placement(False)
+#tf.debugging.set_log_device_placement(False)
 
 try:
-  tf.device('/device:GPU')
+	tf.device('/device:GPU')
 except:
 	tf.device('/device:CPU')
 
 # set the random seeds to get reproducible results
 print("#"*25, " Code Start", "#"*25,"\n")
-np.random.seed(1)
-tf.random.set_seed(2)
+np_seed = np.random.seed(1)
+tf_seed = tf.random.set_seed(2)
 
 # Load data from https://www.openml.org/d/554
 print("#"*25, " Load Data", "#"*25,"\n")
@@ -68,7 +69,6 @@ for num, y_value in enumerate(y):
 	if num<10:
 		print(y_value, y_oh[num])
 
-
 ax1 = plt.subplot(131) ### ( row=1 column=3 imgnumber=1 )
 ax1.imshow(X[0]) ### X must be in the reshaped form (28,28,1) or (28,28) depeding on the matplot lib version
 ax1.set_title( label = "Y label = "+ str( y[0] ))
@@ -81,7 +81,7 @@ ax3 = plt.subplot(133) ### ( row=1 column=1 imgnumber=3 )
 ax3.imshow(X[20]) ### X must be in the reshaped form (28,28,1) or (28,28) depeding on the matplot lib version
 ax3.set_title( label = "Y label ="+ str(y[20]))
 plt.show()
-
+# %%
 print("#"*25, " Load CNN Class ", "#"*25,"\n")
 class MyCNN():
 	def __init__(self,
@@ -89,10 +89,10 @@ class MyCNN():
 				 activ_func = 'relu', last_layer_func = 'softmax' , ### Functions
 				 standard_kernel = (3, 3),  input_shape=(28, 28, 1),  ### CNN input
 				 num_classes = 10 ,                                   ### CNN output
-				 min_image_kernels = 32, dropout_rate = 0.1,          ### CNN parameters
+				 min_image_kernels = 16, dropout_rate = 0.1,          ### CNN parameters
 				 lr = 0.02, decay = 1e-6, momentum = 0.9,             ### Optimizer parameters
 				 batch_size = 1000, epochs=1000,                       ### Batch and Epoch
-				 loss='categorical_crossentropy'):                    ### loss type
+				 loss='categorical_crossentropy', optimizer = "SGD"):   ### loss type
 
 		self.X_train = X_train
 		self.y_oh_train = y_oh_train
@@ -113,17 +113,17 @@ class MyCNN():
 		self.batch_size = batch_size
 		self.epochs = epochs
 		
-	def create_model(self):
+		self.optimizer = optimizer
+		#self.initializer = tf.keras.initializers.Zeros()
 		### under dev.  = initializer =RandomUniform(minval=0.9, maxval=1., seed=1)
+
+	def create_model(self):
 
 		self.model = Sequential()
 		self.model.add( Conv2D( self.mik , (3, 3), 
 							   activation= self.activ_func, 
-							   input_shape= self.input_shape))
-
-		### under dev. 
-		""" kernel_initializer = initializer
-			bias_initializer = initializer """
+							   input_shape= self.input_shape
+							   ))
 
 		### Conv layer 1 -  getting overall details
 		### the more add number of filters/kernel the better, usually your network is
@@ -133,33 +133,44 @@ class MyCNN():
 		self.model.add( MaxPooling2D ( pool_size = (2, 2) ) )
 		self.model.add(Dropout(self.dropout_rate))
 
-		self.model.add(Conv2D(self.mik * 2 , (3, 3), activation = self.activ_func)) ### Conv layer 2 -  getting more details
+		self.model.add(Conv2D(self.mik * 2 , (3, 3), 
+								activation = self.activ_func
+								)) ### Conv layer 2 -  getting more details
 		# Max pooling
 		self.model.add( MaxPooling2D ( pool_size = (2, 2) ) ) ### resuming information  does not has weights
 
 		self.model.add(Flatten())
 
-		self.model.add(Dense( self.mik * 4, activation = self.activ_func)) ### first hidden layer of the fully connected
+		self.model.add(Dense( self.mik * 8, 
+								activation = self.activ_func
+								)) ### first hidden layer of the fully connected
 
 		self.model.add(Dropout(self.dropout_rate))
 
-		self.model.add(Dense(self.mik * 4, activation = self.activ_func)) ### second hidden layer of the fully connected
-
-		self.model.add(Dropout(self.dropout_rate))
-
-		self.model.add(Dense(self.num_classes, activation=self.activ_func))
+		self.model.add(Dense(self.num_classes, activation=self.activ_func
+								))
 
 		self.sgd = SGD(lr = self.lr, decay = self.decay, momentum = self.momentum, nesterov=True) #####
+		self.rmsp = RMSprop(learning_rate = self.lr, rho=0.9, momentum=0.0, epsilon= self.decay, centered=False)
+		self.adag =Adagrad(learning_rate=self.lr, initial_accumulator_value=0.1, epsilon=self.decay)
+
+		if self.optimizer == "SGD":
+			optim = self.sgd
+		elif self.optimizer == "RMSProp":
+			optim = self.rmsp
+		elif self.optimizer == "AdaGrad":
+			optim = self.adag
 
 		# Compile the model
-		self.model.compile(loss='categorical_crossentropy', optimizer= self.sgd)
+		self.model.compile(loss='categorical_crossentropy', optimizer=optim )
 
 	def train(self):
 		start_time = time()
 		self.history = self.model.fit(self.X_train, 
 									  self.y_oh_train, 
 									  batch_size= self.batch_size, 
-									  epochs=self.epochs, verbose = 0) ### 
+									  epochs=self.epochs, verbose = 0,
+									  validation_data = (self.X_test,self.y_oh_test)) ### 
 		end_time = time()
 		self.train_time = end_time - start_time
 
@@ -186,7 +197,7 @@ print("#"*25, " Load Genetic Algorithm Class ", "#"*25,"\n")
 class Genetic_Algorithm():
 	
 	def __init__(self, 
-		lr_ls, decay_ls, batch_size_ls, epoch_ls, dropout_ls, 
+		lr_ls, decay_ls, batch_size_ls, epoch_ls, dropout_ls, optimizer_ls,
 		X_train, y_oh_train, X_test, y_oh_test,y_test, 
 		num_agents = 8): 
 	   
@@ -198,12 +209,14 @@ class Genetic_Algorithm():
 		self.batch_size_ls = batch_size_ls
 		self.epoch_ls = epoch_ls
 		self.dropout_ls = dropout_ls
+		self.optimizer_ls = optimizer_ls
 
 		self.tt_gen_pos_01 = len(lr_ls)
 		self.tt_gen_pos_02 = len(decay_ls)
 		self.tt_gen_pos_03 = len(batch_size_ls)
 		self.tt_gen_pos_04 = len(epoch_ls)
 		self.tt_gen_pos_05 = len(dropout_ls)
+		self.tt_gen_pos_06 = len(optimizer_ls)
 
 		self.num_agents = num_agents
 
@@ -249,7 +262,8 @@ class Genetic_Algorithm():
 		gen_pos_03 = randint(0, self.tt_gen_pos_03-1) ###batch_size
 		gen_pos_04 = randint(0, self.tt_gen_pos_04-1) ###epochs
 		gen_pos_05 = randint(0, self.tt_gen_pos_05-1) ###dropout_rate
-		policy = [gen_pos_01, gen_pos_02, gen_pos_03, gen_pos_04, gen_pos_05 ]
+		gen_pos_06 = randint(0, self.tt_gen_pos_06-1) ###dropout_rate
+		policy = [gen_pos_01, gen_pos_02, gen_pos_03, gen_pos_04, gen_pos_05,gen_pos_06 ]
 		### A policy is composed by index to retrieve values from:
 		#   self.lr_ls          where policy[0] = lr
 		#   self.decay_ls       where policy[1] = decay
@@ -260,34 +274,32 @@ class Genetic_Algorithm():
 	
 	def generate_single_agent (self, policy):
 
-
 		lr_index = policy[0]
 		decay_index = policy[1]
 		bs_index = policy[2]
 		ep_index = policy[3]
 		dr_index = policy[4]
+		opt_index = policy[5]
 		
-		
-
 		modelCNN = MyCNN(self.X_train, self.y_oh_train, 
 							self.X_test,  self.y_oh_test, self.y_test,
 							dropout_rate = self.dropout_ls[dr_index],          
 							lr = self.lr_ls[lr_index], 
 							decay = self.decay_ls[decay_index],           
 							batch_size = self.batch_size_ls[bs_index], 
-							epochs=self.epoch_ls[ep_index])
+							epochs=self.epoch_ls[ep_index],
+							optimizer=self.optimizer_ls[opt_index])
+
 		print('#'*3,' Model Training: \n')
 		print('- optimizer : lr= {} decay= {}'.format( self.lr_ls[lr_index], self.decay_ls[decay_index]))
 		print('- neurons : dropout_rate {}'.format(self.dropout_ls[dr_index]))
 		print('- batch_size= {} epochs= {} '.format(self.batch_size_ls[bs_index], self.epoch_ls[ep_index]),'#'*3,"\n")
 
 		modelCNN.create_model()
-
 		modelCNN.train()
 		modelCNN.test()
-
-		result = [policy, modelCNN.history, modelCNN.train_time, modelCNN.accuracy]
-		#modelCNN.reset_states()                
+		#print(modelCNN.model.summary())
+		result = [policy, modelCNN.history, modelCNN.train_time, modelCNN.accuracy]                
 		return result
 
 	def initialize_agents(self):
@@ -424,7 +436,7 @@ class Genetic_Algorithm():
 
 			for _ in range(nun_gen_2_mutate):
 
-				position = int( np.random.choice( 5, 1) ) ## 5 gen positions
+				position = int( np.random.choice( 6, 1) ) ## 5 gen positions
 				if position == 0:
 					all_moves = self.tt_gen_pos_01 - 1
 				elif position == 1:
@@ -435,6 +447,8 @@ class Genetic_Algorithm():
 					all_moves = self.tt_gen_pos_04 - 1
 				elif position == 4:
 					all_moves = self.tt_gen_pos_05 - 1
+				elif position == 5:
+					all_moves = self.tt_gen_pos_06 - 1
 				if all_moves == 0:
 					move =0
 				else:
@@ -479,9 +493,9 @@ class Genetic_Algorithm():
 		for new_policy in  new_policies:
 			new_policy_ls = new_policy.tolist() ### return from numpy to list format
 			new_result = self.generate_single_agent(new_policy_ls)
-			print("new_policy = ", count, new_policy)
-			print("overall_results lenght= ", len(self.overall_results))
-			print("shape overall_results = ", np.array(self.overall_results).shape)
+			#print("new_policy = ", count, new_policy)
+			#print("overall_results lenght= ", len(self.overall_results))
+			#print("shape overall_results = ", np.array(self.overall_results).shape)
 			self.overall_results.append(new_result)
 			self.store_policy_result(new_result)
 			count += 1
@@ -494,12 +508,14 @@ class Genetic_Algorithm():
 		decay_index = policy[1]; decay = self.decay_ls[decay_index] 
 		bs_index = policy[2]; batch_size = self.batch_size_ls[bs_index]
 		ep_index = policy[3]; epochs=self.epoch_ls[ep_index]
-		dr_index = policy[4]; dropout_rate = self.dropout_ls[dr_index]           
+		dr_index = policy[4]; dropout_rate = self.dropout_ls[dr_index] 
+		opt_index = policy[5]; optimizer = self.optimizer_ls[opt_index]            
 		
 		history = result[1]
 		plt.plot(history.history['loss'])
+		plt.plot(history.history['val_loss'])
 		title = 'model number {} time to train= {} seconds and accuracy {} % \n'.format( num, np.round(result[2], decimals=2), np.round(result[3], decimals = 3)*100)
-		title += ' - optimizer : lr= {} decay= {} \n'.format(lr, decay)
+		title += ' - optimizer: {} lr= {} decay= {} \n'.format(optimizer, lr, decay)
 		title += ' - neurons : dropout_rate {} \n'.format(dropout_rate)
 		title += ' - batch_size= {} epochs= {} '.format(batch_size, epochs)
 				
@@ -531,19 +547,19 @@ class Genetic_Algorithm():
 		return result
 
 print("#"*25, " Set hyperparameters lists", "#"*25,"\n")
-lr_ls = [5e-2,1e-3,5e-3]
-decay_ls = [1e-6,1e-7, 1e-8]
-batch_size_ls = [512,  1000]
-#epoch_ls = [1,10]
-epoch_ls = [100]
-dropout_ls = [0.01, 0.05]
+lr_ls = [1e-3,1e-4]
+decay_ls = [1e-6,1e-7]
+batch_size_ls = [32,500]
+epoch_ls = [150,250]
+dropout_ls = [0.05, 0.01]
+optimizer_ls = ["SGD","AdaGrad","RMSProp"]
 
 print("#"*25, " Genetic Algorithm Start", "#"*25,"\n")
-ga = Genetic_Algorithm(lr_ls,decay_ls,batch_size_ls, epoch_ls, dropout_ls, 
-						X_train, y_oh_train, X_test, y_oh_test, y_test, num_agents=8)
+ga = Genetic_Algorithm(lr_ls,decay_ls,batch_size_ls, epoch_ls, dropout_ls, optimizer_ls,
+						X_train, y_oh_train, X_test, y_oh_test, y_test, num_agents=30)
 
 print("#"*25, " Set hyperparameters lists", "#"*25,"\n")
-best = ga.best_models(final_models = 5, max_generations = 5)
+best = ga.best_models(final_models = 10, max_generations = 2)
 
 all_results = ga.tested_policies
 
@@ -555,20 +571,23 @@ for policy_name in all_results.keys():
 	bs_index = policy[2]
 	ep_index = policy[3]
 	dr_index = policy[4]
-
+	opt_index = policy[5]
+	
 	dropout_rate = ga.dropout_ls[dr_index],          
 	lr = ga.lr_ls[lr_index], 
 	decay = ga.decay_ls[decay_index],           
 	batch_size = ga.batch_size_ls[bs_index], 
 	epochs=ga.epoch_ls[ep_index]
+	optimizer = ga.optimizer_ls[opt_index]
 
 	for result in all_results[policy_name]:
 		
 		title = '\n model - time to train= {} seconds and accuracy {} % \n'.format( np.round(result[2], decimals=2), np.round(result[3], decimals = 3)*100)
-		title += ' - optimizer : lr= {} decay= {} \n'.format(lr, decay)
+		title += ' - optimizer :{} lr= {} decay= {} \n'.format(optimizer, lr, decay)
 		title += ' - neurons : dropout_rate {} \n'.format(dropout_rate)
 		title += ' - batch_size= {} epochs= {} '.format(batch_size, epochs)
 		print(title)
+
 
 # %%
 
@@ -580,11 +599,12 @@ for policy_name in all_results.keys():
 # * What type of data are in the data set?
 # 
 #     <span style="color:red"> 
-#       The MNIST dataset contains grayscale images of handwritten numbers from zero to nine. When they are imported 
-#        in the fetch_openml an array with shape images vs 784 is retrieved
+#       The MNIST dataset contains grayscale images of handwritten numbers from zero to nine. 
+# 		When they are imported in the fetch_openml an array with shape images vs 784 is retrieved. 
+# 		784 is the flattened form of the image and the input values are pixel values ranging from 0 – 255. 
+# 		Because it has only one color channel, it means that the dataset is grayscale.
 #      </span>
 #     
-# 
 # * What does the line ```X = X.reshape(X.shape[0], 28, 28, 1)``` do?
 #     <span style="color:red"> 
 #       This operation reshapre the flatten array into a new array with (columns, height, witdh, colour_channel)
@@ -628,16 +648,16 @@ for policy_name in all_results.keys():
 # 
 # Below is some code for bulding and training a model with Keras.
 # * What type of network is implemented below? I.e. a normal MLP, RNN, CNN, Logistic Regression...?
-#     <span style="color:red"> The type of the network most used is CNN (Convolutional Neural Networks) </span> 
+#     <span style="color:red"> The type of the network used is CNN (Convolutional Neural Networks) </span> 
 # * What does ```Dropout()``` do?
-#     <span style="color:red"> "Dropout randomly disconnects neurons connections to make the CNN more genralistic, 
+#     <span style="color:red"> "Dropout randomly disconnects neurons connections to make the CNN more genralist, 
 #                               and thus reducing the probability of overfitting" </span>
 # * Which type of activation function is used for the hidden layers?
-#     <span style="color:red"> Rectified Linear Unit (RELU) </span>
+#     <span style="color:red"> Rectified Linear Unit (ReLU) </span>
 # * Which type of activation function is used for the output layer?
 #     <span style="color:red"> Softmax </span>
 # * Why are two different activation functions used?
-#     <span style="color:red"> Relu is used to solve the vanishing gradient problem 
+#     <span style="color:red"> ReLU is used to solve the vanishing gradient problem 
 #							   and it reduced the influence of negative values after a convolution,
 #                              while softmax is used to transform the output layer probabilities
 #                              into the most probable output </span>
@@ -645,15 +665,12 @@ for policy_name in all_results.keys():
 #     <span style="color:red"> Although the name of the function is SGD (Stochastic Gradient Descent)
 # 						the model useds batch gradient descent </span>
 # * How often are the weights updated (i.e. after how many data examples)?
-#     <span style="color:red"> The epoch determines when the weights are updated. 
-#                               Only after the whole dataset is fed to the mode </span>
-# 
-# 
-# * What loss function is
-# 
-# 
-# 
-#  used?
+#     <span style="color:red"> The epoch and batches will define when the weights are updated.   
+# 							Since this specific model is using mini-batch gradient descent,
+#  							the model will update their weights after completing a batch.
+#  							A dataset with 800 images with a batch size of 32 
+# 							will have 25 weights updates per epoch. </span>
+# * What loss function is  used?
 # 
 #     <span style="color:red"> Categorical crossentropy </span>
 # 
@@ -664,17 +681,6 @@ for policy_name in all_results.keys():
 # 
 #from IPython import embed; embed()
 
-
-# ## Part 2 - train a model	
-# 
-# A model's performance depends on many factors apart from the model architecture (e.g. type and number of layers) and the dataset. Here you will get to explore some of the factors that affect model performance. Much of the skill in training deep learning models lies in quickly finding good values/options for these choises.
-# 
-# In order to observe the learning process it is best to compare the training set loss with the loss on the test set. How to visualize these variables with Keras is described under [Training history visualization](https://keras.io/visualization/#training-history-visualization) in the documentation.
-# 
-# You will explore the effect of 1) optimizer, 2) training duration, and 3) dropout (see the question above).
-# 
-# When training, an **epoch** is one pass through the full training set.
-
 # %%
 # ### Question 3
 # 
@@ -682,7 +688,7 @@ for policy_name in all_results.keys():
 #     * Remember to first reset the weights (```model.reset_states()```), otherwise the training just continues from where it was stopped earlier.
 # 
 # * **Optimizer**. Select three different optimizers and for each find the close-to-optimal hyper-parameter(s). In your answer, include a) your three choises, b) best hyper-parameters for each of the three optimizers and, c) the code that produced the results.
-#     * *NOTE* that how long the training takes varies with optimizer. I.e., make sure that the model is trained for long enough to reach optimal performance.
+#     * NOTEa that how long the training takes varies with optimizer. I.e., make sure that the model is trained for long enough to reach optimal performance.
 # 
 # * **Dropout**. Use the best optimizer and do hyper-parameter seach and find the best value for ```Dropout()```.
 # 
